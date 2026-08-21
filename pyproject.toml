@@ -1,0 +1,22 @@
+[project]
+name = "music-generation"
+version = "0.1.0"
+description = "Text-to-music generation with MiniMax-Music3 via diffusers Modular Pipelines, logged to Weights & Biases"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "accelerate>=1.14.0",
+    "diffusers",
+    "marimo>=0.24.0",
+    "openai>=3.3.1",
+    "python-dotenv>=1.2.2",
+    "soundfile>=0.13.0",
+    "torch>=2.13.0",
+    "transformers>=5.14.1",
+    "wandb>=0.28.1",
+]
+
+[tool.uv.sources]
+# Pinned: MiniMax-Music3 modular-pipeline support (diffusers PR #14456) is not
+# in a stable release yet; this is the commit the integration lands on.
+diffusers = { git = "https://github.com/huggingface/diffusers.git", rev = "dafe3733fcfdbf3c48915fe77be3aef65b5d6a2d" }

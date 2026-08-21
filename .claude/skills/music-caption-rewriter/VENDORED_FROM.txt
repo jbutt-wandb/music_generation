@@ -1,0 +1,3 @@
+Vendored from https://github.com/MiniMax-AI/MiniMax-Music3
+path: skills/music-caption-rewriter
+commit: 945655064d59b98004dd70002e7eb5c8c6e11373 (2026-08-19)

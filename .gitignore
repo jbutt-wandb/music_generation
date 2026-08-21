@@ -1,0 +1,23 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+.DS_Store
+
+# Credentials
+.env
+
+# Run outputs
+/generated_audio/
+/logs/
+
+# Downloaded demo-gallery mp3s (scripts/extract_demo_prompts.py --download-audio)
+/demo_audio/
+
+__marimo__
