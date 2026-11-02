@@ -181,6 +181,19 @@ first attempt with `--offload none`.
 - The audio panel ("Generated Audio") uploads to the W&B run automatically;
   `wandb: Synced` + `Saved audio locally to ...wav` appeared as expected.
 
+## Three-movement ambient/psychedelic R&B suite, 180 s cap (run q1ggvxzv, 2026-10-27)
+
+One continuous piece with movement-level tempo/texture shifts described in a
+single caption (psychedelic R&B ~65–70 BPM → muffled low-passed piano ~60 BPM →
+drumless free-tempo choral outro). Caption in the run's W&B config; lyrics
+`assets/let-the-morning-find-us.txt`.
+
+- **Duration is a cap, confirmed:** very sparse lyrics (ad-libs, a whispered
+  couplet, one repeated outro line) with `--audio_duration 180` produced a
+  129.7 s song — the model ends when the lyrics run out. To fill a long
+  duration with sparse vocals, add more `[Instrumental]`/section tags or
+  repeat the outro line more times.
+
 ## Memory / duration constraints (pre-run knowledge — verify against real runs)
 
 - ~23 GB of bf16 weights: fits one H100 80GB with no offloading (`--offload none`).
