@@ -79,6 +79,22 @@ The Slurm-cluster counterpart (now the fallback path) is
 | Snapshot create fails after a full build | transient gateway/`FSS_CREATE_TIMED_OUT` — strikes at max accumulated state | the tooling retries ×5 against the still-alive sandbox; never tear down and rebuild over one failed RPC |
 | W&B warns `Path /work/wandb wasn't writable` | WANDB_DIR not created before `wandb.init` | `bootstrap_code` mkdirs it on every pathway; if seen, the sandbox predates that fix — `sync` once |
 | 401 opening the app URL | local token stale vs the sandbox's `APP_TOKEN` | `sandbox.py status` prints the URL with the recovered token |
+| Launcher's nohup log stays empty while it works | Python buffers stdout when not a tty | run detached drivers with `PYTHONUNBUFFERED=1 nohup uv run ...` |
+| A sandbox vanished after killing its driver | cwsandbox installs SIGINT/SIGTERM handlers at import, so `pkill`/Ctrl-C runs the driver's `finally:` cleanup — a mid-`seed` kill *deletes the build sandbox* (observed live: a fully built 57 GB mount, gone) | never kill a seed/reseed driver expecting its sandbox to survive; if interrupted, just re-run `seed` — a full rebuild is only ~5 min on CoreWeave's network |
+
+## Field notes from the first real day (2026-11-03)
+
+- **Capacity droughts end without warning.** The GPU pool rejected creates for
+  ~3 hours, then `up`'s **last** retry (6th attempt, ~15 min in) landed an
+  H100. Don't abandon a cycle early, and re-running `up` later costs nothing —
+  failed creates are never billed.
+- **`down`'s WAV pull is load-bearing**: a real app session ended with 5 songs
+  existing only on the sandbox mount; `down` pulled all 5 before deleting.
+  Don't bypass it with a raw SDK delete.
+- **Library users must call `require_api_key()` before any SDK call** — the
+  entry points do this; ad-hoc scripts importing `sandbox_lib` that skip it get
+  `CWSandboxAuthenticationError` from deferred `OperationRef.result()` calls
+  (and `reconnect` deliberately re-raises rather than masking it as "gone").
 
 ## Costs at a glance
 

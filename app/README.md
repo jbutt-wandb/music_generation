@@ -80,8 +80,15 @@ uv run --no-project --python 3.12 scripts/sandbox.py down
 ```
 
 > **The URL is public internet.** The platform does no caller auth on sandbox
-> endpoints — marimo's `access_token` in the URL is the only lock. Don't share
-> the link; `down`/`up` rotates the sandbox (and `status` re-prints the URL).
+> endpoints — marimo's `access_token` in the URL is the only lock. Treat the
+> link as a credential: anyone holding it generates **under your identity** —
+> their runs log to your W&B entity and their Simple-mode compositions spend
+> your W&B Inference quota (they cannot read the keys themselves; marimo's run
+> mode executes only the app). Share person-to-person with people you trust,
+> or have colleagues run their own `up` with their own keys and
+> `SNAPSHOT_ID=<your snapshot>` — they reuse your seeded snapshot without
+> re-downloading anything. `down`/`up` rotates the sandbox (and `status`
+> re-prints the URL).
 
 Other lifecycle commands:
 
