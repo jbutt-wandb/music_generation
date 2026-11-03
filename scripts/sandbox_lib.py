@@ -36,6 +36,7 @@ from dotenv import dotenv_values
 
 from cwsandbox import (
     AuthStrategy,
+    CWSandboxAuthenticationError,
     Endpoint,
     EndpointAuth,
     EndpointKind,
@@ -337,6 +338,10 @@ def reconnect(sandbox_id: str | None) -> Sandbox | None:
         if not hasattr(sb, "get_status"):  # newer SDKs return an OperationRef
             sb = sb.result()
         return sb if sb.get_status() == SandboxStatus.RUNNING else None
+    except CWSandboxAuthenticationError:
+        # Misconfigured auth must not masquerade as "sandbox gone" — callers
+        # would silently create duplicates (require_api_key() not called?).
+        raise
     except Exception:
         return None
 
