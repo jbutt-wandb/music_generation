@@ -219,6 +219,11 @@ def cmd_up(args) -> None:
         sb = lib.create_studio(dotenv, state, snapshot_id)
         print(f"Sandbox up: {sb.sandbox_id}")
         _sync(sb, state)
+    except lib.SandboxResourceExhaustedError:
+        sys.exit("The serverless GPU pool is full (all retries exhausted). "
+                 "Nothing was created or billed. Try `up` again later, or "
+                 "generate headlessly now — scripts/sandbox_generate.py falls "
+                 "back to the Slurm cluster automatically.")
     except Exception:
         # Reap ONLY the studio role — a seed/reseed build running in another
         # terminal shares APP_TAG and must survive this failure.
