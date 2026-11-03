@@ -129,8 +129,9 @@ brings new ones local.
   fallback ran verified end-to-end**: provisioned allocation, 30 s song in
   113 s wall, WAV scp'd local, allocation released (run shzx017o).
 - **W&B routing depends on `.env` completeness**: without `WANDB_ENTITY` /
-  `WANDB_PROJECT` the run lands in the API key's default entity under
-  `uncategorized`. Both must be set locally (the sandbox env inherits them)
+  `WANDB_PROJECT` the run landed in the API key's default entity under
+  `uncategorized`. (As of 2026-11-03 the script instead **disables logging
+  entirely** when either var is missing — no more silent mis-routing.) Both must be set locally (the sandbox env inherits them)
   and in the cluster mirror's `.env` (the fallback reads that copy).
 
 # Slurm cluster — the FALLBACK path

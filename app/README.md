@@ -3,7 +3,8 @@
 A web UI for generating full songs with **MiniMax-Music3**, modeled on the
 official demo Space. You describe a song (or write lyrics + a Structured Caption
 yourself) and the finished track plays in your browser — with every run logged
-to Weights & Biases.
+to Weights & Biases when `WANDB_ENTITY`/`WANDB_PROJECT` are configured
+(recommended; without them runs are not logged).
 
 The app runs **inside a CoreWeave serverless GPU sandbox**: `scripts/sandbox.py up`
 creates a 1-GPU sandbox from a pre-built filesystem snapshot (app venv + ~57 GB
@@ -28,16 +29,19 @@ uv run --no-project --python 3.12 scripts/sandbox.py up   # → prints the app U
    IAM role at [console.coreweave.com/tokens](https://console.coreweave.com/tokens).
    GPU sandboxes are in preview; if `probe` reports *"not entitled to create GPU
    sandboxes"*, ask your CoreWeave account team to allowlist the org.
-2. **Credentials in `.env`** (repo root; copy `.env_example`): `WANDB_API_KEY`,
-   `WANDB_ENTITY`, `WANDB_PROJECT` — songs and their configs are logged to this
-   W&B project, and the same key authenticates the app's lyric/caption composer
-   (Kimi K2.6 via W&B Inference) — plus `HF_TOKEN` for the one-time model
-   download during `seed`. Optional: `SNAPSHOT_ID` (adopt a teammate's snapshot),
-   `SANDBOX_IMAGE`, `SANDBOX_CPU`/`SANDBOX_MEMORY` overrides.
-3. **`uv`** on the local machine. (No local `uv sync` is needed just to launch
+2. **`WANDB_API_KEY`** in `.env` — also **required**: it authenticates the app's
+   lyric/caption composer (Kimi K2.6 via W&B Inference). The launchers exit
+   upfront unless BOTH required keys are present — nothing is spun up otherwise.
+3. **Recommended: `WANDB_ENTITY` + `WANDB_PROJECT`** in `.env` — with both set,
+   every song and its config is logged to that W&B project (recommended); if
+   either is unset, generation still works but **runs are not logged at all**.
+   Plus `HF_TOKEN` for the one-time model download during `seed`. Optional:
+   `SNAPSHOT_ID` (adopt a teammate's snapshot), `SANDBOX_IMAGE`,
+   `SANDBOX_CPU`/`SANDBOX_MEMORY` overrides.
+4. **`uv`** on the local machine. (No local `uv sync` is needed just to launch
    the app — the launcher is a self-contained uv script, and the app's venv
    lives in the snapshot.)
-4. An ssh alias `coreweave-login` is **only** needed for the Slurm *fallback*
+5. An ssh alias `coreweave-login` is **only** needed for the Slurm *fallback*
    path of `scripts/sandbox_generate.py` — the app itself never uses ssh.
 
 ## One-time setup — probe, then seed the snapshot

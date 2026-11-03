@@ -19,10 +19,13 @@ https://wandb.ai/wandb-smle/jb_music_gen/
 
 ## Setup
 
-1. **Credentials** — `cp .env_example .env` and fill it in: `CWSANDBOX_API_KEY`
-   (console.coreweave.com/tokens, "Sandbox User" role), `WANDB_API_KEY`,
-   `WANDB_ENTITY`, `WANDB_PROJECT` (songs are logged to *your* project), and `HF_TOKEN`
-   (authenticates the model download).
+1. **Credentials** — `cp .env_example .env` and fill it in. Two keys are
+   **required** — nothing will be spun up without both: `CWSANDBOX_API_KEY`
+   (console.coreweave.com/tokens, "Sandbox User" role) and `WANDB_API_KEY`
+   (W&B Inference — authenticates the lyric/caption composer). **Recommended:**
+   `WANDB_ENTITY` + `WANDB_PROJECT` — with both set, every song is logged to
+   *your* W&B project; if either is unset, generation still works but runs are
+   not logged at all. `HF_TOKEN` authenticates the one-time model download.
 2. **Local environment** — `uv sync`. diffusers is pinned to a git commit; do **not**
    install `kernels`.
 3. **One-time snapshot** — build the sandbox filesystem snapshot (app venv + weights,
@@ -90,9 +93,10 @@ fixed); new words → new lyrics, then a new caption.
 
 ## Results
 
-Every run is a W&B run: the song plays in the browser under **Media → "Generated Audio"**,
-with the full config (caption, lyrics, seed, duration) attached, so any output can be
-traced and reproduced. WAVs land locally in `generated_audio/MiniMax-Music3/` —
+With `WANDB_ENTITY`/`WANDB_PROJECT` set (recommended), every run is a W&B run: the song
+plays in the browser under **Media → "Generated Audio"**, with the full config (caption,
+lyrics, seed, duration) attached, so any output can be traced and reproduced. If either
+var is unset, runs are not logged — generation still works, but you keep only the WAVs. WAVs land locally in `generated_audio/MiniMax-Music3/` —
 `sandbox_generate.py` downloads them automatically; app-session WAVs arrive via
 `sandbox.py pull` (or `down`, which pulls first).
 

@@ -8,6 +8,7 @@ os.environ.setdefault("TORCH_DISABLE_NATIVE_JIT", "1")
 # Long generations fragment the CUDA allocator without expandable segments.
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
+import contextlib
 import torch
 import wandb
 import uuid
@@ -109,6 +110,13 @@ def load_model(model_id, num_gpus, offload, device):
 
 def main(config):
     print("Starting music generation process...")
+    # W&B run logging is recommended but optional: it happens only when BOTH
+    # WANDB_ENTITY and WANDB_PROJECT are set; otherwise nothing is logged.
+    wandb_entity = os.environ.get("WANDB_ENTITY")
+    wandb_project = os.environ.get("WANDB_PROJECT")
+    log_to_wandb = bool(wandb_entity and wandb_project)
+    if not log_to_wandb:
+        print("W&B logging disabled (set WANDB_ENTITY and WANDB_PROJECT to log runs).")
     # Resolve the lyrics first: fail fast on a bad path before spending minutes
     # loading ~23GB of weights. The resolved text goes into the W&B config so a
     # run stays reproducible even if the lyrics file later changes.
@@ -146,12 +154,16 @@ def main(config):
     # Load Model
     pipe = load_model(config["model_id"], num_gpus, config["offload"], config["device"])
 
-    # Log audio to WB
-    with wandb.init(
-        entity=os.environ.get("WANDB_ENTITY"),
-        project=os.environ.get("WANDB_PROJECT"),
-        config=config,
-        name=f"minimax-music3-generation-{str(uuid.uuid1())[0:5]}",
+    # Log audio to WB (skipped entirely when logging is disabled — see above)
+    with (
+        wandb.init(
+            entity=wandb_entity,
+            project=wandb_project,
+            config=config,
+            name=f"minimax-music3-generation-{str(uuid.uuid1())[0:5]}",
+        )
+        if log_to_wandb
+        else contextlib.nullcontext()
     ) as run:
 
         print(f"Generating music for prompt: '{config['prompt']}' (duration={config['audio_duration']}s)")
@@ -180,14 +192,15 @@ def main(config):
 
         print(f"Saved audio locally to {output_filename}")
 
-        audio = wandb.Audio(
-                output_filename,
-                caption=f"{title} (seed {config['seed']})",
-            )
+        if run is not None:
+            audio = wandb.Audio(
+                    output_filename,
+                    caption=f"{title} (seed {config['seed']})",
+                )
 
-        # Method A: Direct Audio Logging
-        panel_name = "Generated Audio"
-        run.log({panel_name: audio})
+            # Method A: Direct Audio Logging
+            panel_name = "Generated Audio"
+            run.log({panel_name: audio})
 
         # Method B: Log to a W&B Table
         # table = wandb.Table(columns=["Prompt", "Lyrics", "Seed", "Duration", "Audio"])
@@ -201,8 +214,12 @@ def main(config):
 
         # run.log({"generation_results_table": table})
 
-    # Run automatically finishes when exiting the 'with' block (even if an error occurs)
-    print(f"Successfully finished run={run.id} and logged generation results to Weights & Biases!")
+    # Run automatically finishes when exiting the 'with' block (even if an error occurs).
+    # Both lines end with the marker app/backend.py's _parse_log keys on.
+    if run is not None:
+        print(f"Successfully finished run={run.id} and logged generation results to Weights & Biases!")
+    else:
+        print("Successfully finished run=disabled (W&B logging off)")
 
 if __name__ == "__main__":
 

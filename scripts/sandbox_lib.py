@@ -123,14 +123,18 @@ def load_dotenv() -> dict[str, str]:
 
 
 def require_api_key(dotenv: dict[str, str]) -> None:
-    """Expose CWSANDBOX_API_KEY to the SDK via os.environ (never print it)."""
-    if os.environ.get("CWSANDBOX_API_KEY"):
-        return
-    if dotenv.get("CWSANDBOX_API_KEY"):
-        os.environ["CWSANDBOX_API_KEY"] = dotenv["CWSANDBOX_API_KEY"]
-        return
-    sys.exit("CWSANDBOX_API_KEY not found in .env or the environment — create a "
-             "console token (Sandbox User role) at console.coreweave.com/tokens")
+    """Hard-require the two spin-up keys — nothing is created without BOTH.
+    Exposes CWSANDBOX_API_KEY to the SDK via os.environ (never print either)."""
+    if not os.environ.get("CWSANDBOX_API_KEY"):
+        if dotenv.get("CWSANDBOX_API_KEY"):
+            os.environ["CWSANDBOX_API_KEY"] = dotenv["CWSANDBOX_API_KEY"]
+        else:
+            sys.exit("CWSANDBOX_API_KEY not found in .env or the environment — create a "
+                     "console token (Sandbox User role) at console.coreweave.com/tokens")
+    if not (os.environ.get("WANDB_API_KEY") or dotenv.get("WANDB_API_KEY")):
+        sys.exit("WANDB_API_KEY (W&B Inference) is required — the in-app composer "
+                 "authenticates with it; nothing will be spun up without it. "
+                 "Get one at wandb.ai/authorize")
 
 
 def resolve_image(dotenv: dict[str, str]) -> str:
@@ -415,12 +419,14 @@ def studio_env(dotenv: dict[str, str], app_token: str) -> dict[str, str]:
         **TORCH_ENV,
     }
     for key in ("WANDB_API_KEY", "WANDB_ENTITY", "WANDB_PROJECT", "HF_TOKEN"):
-        if dotenv.get(key):
-            env[key] = dotenv[key]
-    missing = [k for k in ("WANDB_API_KEY", "WANDB_ENTITY", "WANDB_PROJECT") if k not in env]
+        val = dotenv.get(key) or os.environ.get(key)
+        if val:
+            env[key] = val
+    missing = [k for k in ("WANDB_ENTITY", "WANDB_PROJECT") if k not in env]
     if missing:
-        print(f"warning: {', '.join(missing)} not set in .env — W&B logging and "
-              f"the Kimi composer will fail in the sandbox", file=sys.stderr)
+        print(f"note: {', '.join(missing)} not set — runs will NOT be logged to "
+              f"W&B (recommended: set WANDB_ENTITY and WANDB_PROJECT in .env)",
+              file=sys.stderr)
     return env
 
 
