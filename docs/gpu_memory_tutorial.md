@@ -5,8 +5,9 @@ real model as the running example. The stack is ~23 GB of bf16 weights across fo
 components — an 8B Qwen3 language model (~16 GB), a 0.6B RVQ depth decoder, a 2.4B
 flow-matching transformer, and a Flow-VAE vocoder — so unlike its 124 GB video
 sibling it fits an 80 GB H100 outright. The story here is therefore *inverted*:
-on the cluster you need none of these techniques; they exist to run the same model
-on progressively smaller cards.
+on the serverless GPU sandboxes (H100 80 GB or RTX PRO 6000 96 GB) and the cluster
+fallback you need none of these techniques; they exist to run the same model on
+progressively smaller cards.
 
 Code marked **[in this repo]** runs here today (behind the `--offload` flag). Code
 marked **[pattern]** is a worked sketch against diffusers main (our pinned rev) that
@@ -37,7 +38,8 @@ for d in range(torch.cuda.device_count()):
 ## 1. Everything resident — the H100 default **[in this repo]**
 
 `--offload none` (the default): load all components in bf16 and put them on the GPU.
-Fastest, simplest, and on an 80 GB card there is no reason to do anything else —
+Fastest, simplest, and on an 80+ GB card (both GPU models in the sandbox pool, and
+the cluster's H100s) there is no reason to do anything else —
 ~23 GB of weights leaves ~55 GB of headroom for the KV cache and latents at any
 legal duration.
 
@@ -116,9 +118,11 @@ The LLM writes the *composition* — melody, phrasing, song structure — so qua
 error lands on the most audible part of the stack. A/B against bf16 on a fixed seed
 before trusting it.
 
-## 5. Apple Silicon (MPS) — `--device mps` **[in this repo, experimental]**
+## 5. Apple Silicon (MPS) — `--device mps` **[in this repo, experimental, script-only]**
 
-The script can target a Mac's unified memory instead of CUDA. The math that governs it:
+The script can target a Mac's unified memory instead of CUDA. (The marimo app no
+longer exposes an MPS mode — it runs inside a CUDA sandbox; this flag remains on
+`scripts/minimax_music3.py` for direct local use.) The math that governs it:
 
 - **Capacity:** ~23 GB of bf16 weights + KV cache share unified memory with macOS —
   16 GB Macs are out, 32 GB is tight, 36 GB+ is comfortable.
@@ -145,7 +149,7 @@ The script can target a Mac's unified memory instead of CUDA. The math that gove
 
 | Symptom | Reach for | Cost |
 |---|---|---|
-| On the H100 cluster | 1. `--offload none` | none — this is the default |
+| On a sandbox GPU or the H100 cluster | 1. `--offload none` | none — this is the default |
 | ~24 GB card (4090-class) OOMs at load | 2. `--offload auto` | stage-boundary transfers |
 | 8–16 GB card | 3. `--offload group` | much slower LLM stage |
 | Still short after offloading | 4. quantize the LLM | composition quality risk |

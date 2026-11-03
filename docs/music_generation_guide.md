@@ -7,7 +7,8 @@ pipeline → generate → write WAV → log the audio to Weights & Biases.
 | | MiniMax-Music3 |
 |---|---|
 | Script (local repo) | `scripts/minimax_music3.py` |
-| Script (cluster) | `~/music_gen_demo/scripts/minimax_music3.py` |
+| Script (in the sandbox) | `/work/app/scripts/minimax_music3.py` — both pathways run it there |
+| Script (cluster fallback) | `~/music_gen_demo/scripts/minimax_music3.py` |
 | Output | full song: stereo WAV, vocals + arrangement (44.1 kHz on the released checkpoint — the script reads `pipe.sampling_rate`, never assumes) |
 | Size / hardware | ~11B total (8B Qwen3 LLM + 0.6B RVQ depth decoder + 2.4B flow-matching transformer + vocoder) ≈ 23 GB bf16 — fits one H100 80GB outright |
 | diffusers API | Modular Pipelines (`ModularPipeline`, experimental, pinned git commit) |
@@ -19,13 +20,19 @@ pipeline → generate → write WAV → log the audio to Weights & Biases.
 ## Querying MiniMax-Music3
 
 ```bash
-# Local / interactive on a compute node:
+# Canonical: the sandbox pathway wraps this script end-to-end (creates/reuses
+# the GPU sandbox, runs it there, downloads the WAV; Slurm fallback built in):
+uv run --no-project --python 3.12 scripts/sandbox_generate.py \
+  --prompt_file prompt.txt --lyrics_file assets/neon_rain.txt \
+  --audio_duration 60 --seed 42
+
+# Direct invocation (inside the sandbox, on a compute node, or any CUDA box):
 uv run scripts/minimax_music3.py \
   --prompt "<Structured Caption — see docs/minimax_music_prompt_guide.md>" \
   --lyrics_file assets/neon_rain.txt \
   --audio_duration 60 --seed 42
 
-# Cluster (see docs/cluster_environment.md for the required env setup):
+# Cluster fallback launch template (see docs/cluster_environment.md):
 cd ~/music_gen_demo && mkdir -p logs
 nohup env TORCH_DISABLE_NATIVE_JIT=1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
   srun --jobid=<JOBID> --overlap --export=ALL \
@@ -82,16 +89,23 @@ it to compare caption/lyric tweaks apples-to-apples.
 ~57 GB download on first use, CC-BY-4.0). Only change it for a checkpoint variant of
 the same architecture.
 
-**`--device`** — `cuda` (default; the cluster path, all offload modes) or `mps`
-(Apple Silicon, **experimental**): requires ≥32 GB unified memory (~23 GB of bf16
-weights), supports only `--offload none` (the offload machinery is CUDA-only), runs
-5–20× slower than an H100 (autoregressive decode is memory-bandwidth-bound), and the
-pipeline's operator coverage on MPS is unverified — expect possible failures. The
-first local run downloads ~57 GB to `~/.cache/huggingface`.
+**`--device`** — `cuda` (default; sandbox and cluster paths, all offload modes) or
+`mps` (Apple Silicon, **experimental**, script-only — the app no longer exposes it):
+requires ≥32 GB unified memory (~23 GB of bf16 weights), supports only
+`--offload none` (the offload machinery is CUDA-only), runs 5–20× slower than an
+H100 (autoregressive decode is memory-bandwidth-bound), and the pipeline's operator
+coverage on MPS is unverified — expect possible failures. The first local run
+downloads ~57 GB to `~/.cache/huggingface`.
 
-**The marimo app** (`uv run marimo run app/app.py`) is a front-end over this exact
-script — same arguments, same W&B logging — with a CUDA/MPS selector. It requires a
-running cluster allocation in CUDA mode and never provisions one.
+**`--output`** — optional explicit WAV path (parent dirs created). Default is
+`generated_audio/<model>/minimax_music3_output.wav`; the app and
+`sandbox_generate.py` pass per-run `<slug>_s<seed>.wav` paths so concurrent or
+successive runs never overwrite each other.
+
+**The marimo app** (launched with `scripts/sandbox.py up`, served from inside a GPU
+sandbox) is a front-end over this exact script — same arguments, same W&B logging.
+It never provisions or releases sandboxes itself; `scripts/sandbox.py` owns the
+lifecycle (see `app/README.md`).
 
 **Why no `negative_prompt` / `guidance_scale`?** The composition is written by an
 autoregressive language model, not a CFG-guided denoiser; the flow-matching stage runs

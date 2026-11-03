@@ -1,88 +1,93 @@
 # Music Generation Studio — the marimo web app
 
-A local web UI for generating full songs with **MiniMax-Music3**, modeled on the
+A web UI for generating full songs with **MiniMax-Music3**, modeled on the
 official demo Space. You describe a song (or write lyrics + a Structured Caption
-yourself), the app runs the model on a CoreWeave H100 over ssh, and the finished
-track plays in your browser — with every run logged to Weights & Biases.
+yourself) and the finished track plays in your browser — with every run logged
+to Weights & Biases.
 
-![The app: device selector, cluster status, and Simple mode](screenshots/app-overview.png)
+The app runs **inside a CoreWeave serverless GPU sandbox**: `scripts/sandbox.py up`
+creates a 1-GPU sandbox from a pre-built filesystem snapshot (app venv + ~57 GB
+of model weights), starts marimo in it, and prints a tokenized HTTPS URL. The
+same GPU that serves the app generates the music — no ssh, no Slurm allocation.
 
 ```bash
-uv run marimo run app/app.py       # from the repo root → opens at http://localhost:2718
+uv run --no-project --python 3.12 scripts/sandbox.py up   # → prints the app URL
 ```
 
-> ## ⚠️ The cluster must already be running
-> **This app never starts or stops GPUs.** In CUDA mode it only *detects* a
-> running `musicgen` Slurm allocation. You provision it before using the app,
-> and you release it when you're done (step 3 below). If no allocation exists,
-> the app shows a red warning and generation is disabled.
+> ## ⚠️ The sandbox bills while it runs
+> A studio sandbox costs GPU-time from the moment it is ready until you tear it
+> down. **Run `sandbox.py down` when you're done** — it pulls your WAVs first,
+> then deletes the sandbox. A 24 h max lifetime is the backstop if you forget,
+> not the plan.
 
 ---
 
 ## Prerequisites
 
-1. **SSH access to the CoreWeave training cluster.** The app drives everything
-   through a passwordless ssh alias named `coreweave-login`. If you don't have
-   cluster access, contact **Tara Madhyastha at CoreWeave**. Set up the alias in
-   `~/.ssh/config`:
-
-   ```
-   Host coreweave-login
-       HostName <your-cluster-login-hostname>
-       User <your-cluster-username>
-       IdentityFile ~/.ssh/<your-key>
-   ```
-
-   Verify with `ssh -o BatchMode=yes coreweave-login true` — it must succeed
-   without any prompt.
-
+1. **`CWSANDBOX_API_KEY`** in `.env` — create a token with the **"Sandbox User"**
+   IAM role at [console.coreweave.com/tokens](https://console.coreweave.com/tokens).
+   GPU sandboxes are in preview; if `probe` reports *"not entitled to create GPU
+   sandboxes"*, ask your CoreWeave account team to allowlist the org.
 2. **Credentials in `.env`** (repo root; copy `.env_example`): `WANDB_API_KEY`,
    `WANDB_ENTITY`, `WANDB_PROJECT` — songs and their configs are logged to this
    W&B project, and the same key authenticates the app's lyric/caption composer
-   (Kimi K2.6 via W&B Inference) — plus `HF_TOKEN` for the model download.
+   (Kimi K2.6 via W&B Inference) — plus `HF_TOKEN` for the one-time model
+   download during `seed`. Optional: `SNAPSHOT_ID` (adopt a teammate's snapshot),
+   `SANDBOX_IMAGE`, `SANDBOX_CPU`/`SANDBOX_MEMORY` overrides.
+3. **`uv`** on the local machine. (No local `uv sync` is needed just to launch
+   the app — the launcher is a self-contained uv script, and the app's venv
+   lives in the snapshot.)
+4. An ssh alias `coreweave-login` is **only** needed for the Slurm *fallback*
+   path of `scripts/sandbox_generate.py` — the app itself never uses ssh.
 
-3. **A local environment:** `uv sync` in the repo root (installs marimo and
-   everything else).
-
-## One-time cluster setup — move the code to the cluster
-
-The generation script must live on the cluster in `~/music_gen_demo`. Mirror
-the repo there and build its environment (re-run the `rsync` whenever scripts
-or docs change):
-
-```bash
-# From the repo root, on your machine:
-rsync -av --exclude .git --exclude .venv --exclude generated_audio --exclude demo_audio \
-  ./ coreweave-login:music_gen_demo/
-
-# Build the Python environment on the cluster (one time, and after dependency changes):
-ssh coreweave-login "cd ~/music_gen_demo && export PATH=\$HOME/.local/bin:\$PATH && uv sync"
-```
-
-The first generation downloads ~57 GB of model weights into the cluster's
-`~/.cache/huggingface` — check your quota; later runs reuse the cache.
-
-## Every session: spin up the cluster, then the app
+## One-time setup — probe, then seed the snapshot
 
 ```bash
-# 1. Provision one H100 (from the login node):
-ssh coreweave-login
-sbatch -p h100 --gres=gpu:1 --cpus-per-task=16 --mem=100G --job-name=musicgen --wrap "sleep infinity"
-squeue -u $USER        # wait until the musicgen job shows state R (running)
-exit
+# 1. ~1-minute GPU entitlement/capacity check (creates + deletes a tiny GPU
+#    sandbox; costs cents; also reveals which GPU model the pool hands you):
+uv run --no-project --python 3.12 scripts/sandbox.py probe
 
-# 2. Launch the app locally:
-uv run marimo run app/app.py
+# 2. Build the filesystem snapshot: app venv + ~57 GB of MiniMax-Music3 weights,
+#    assembled on a cheap CPU-only sandbox (no GPU needed; works even when the
+#    GPU pool is full). Expect ~30-60 min. The snapshot id lands in
+#    .launch/sandbox-state.json.
+uv run --no-project --python 3.12 scripts/sandbox.py seed
 ```
 
-Open http://localhost:2718, and the execution panel should show
-**"✅ Cluster allocation NNNN is running"** (click *↻ Re-check cluster* if you
-provisioned after launching). When you're done for the day:
+Every later launch *forks* this snapshot instead of re-downloading. When
+`pyproject.toml`/`uv.lock` or the runtime change, refresh it incrementally with
+`sandbox.py reseed` (minutes, not another full seed). Teammates can skip seeding
+entirely: share the snapshot id and they set `SNAPSHOT_ID` in their `.env` (or
+pass `up --snapshot-id <id>`).
+
+## Every session
 
 ```bash
-# 3. Release the GPU — the app will NOT do this for you:
-ssh coreweave-login scancel <JOBID>
+# 1. Launch (or reuse) the studio sandbox — ~60 s create + ~4 min snapshot
+#    restore, then marimo starts and the URL prints (and opens, on macOS):
+uv run --no-project --python 3.12 scripts/sandbox.py up
+#    ✅ ready: https://2718-<sandbox-id>....cwsandbox.com/?access_token=<token>
+
+# 2. Make music in the browser.
+
+# 3. Done for the day — pulls new WAVs to generated_audio/MiniMax-Music3/,
+#    then deletes the sandbox (billing stops):
+uv run --no-project --python 3.12 scripts/sandbox.py down
 ```
+
+> **The URL is public internet.** The platform does no caller auth on sandbox
+> endpoints — marimo's `access_token` in the URL is the only lock. Don't share
+> the link; `down`/`up` rotates the sandbox (and `status` re-prints the URL).
+
+Other lifecycle commands:
+
+| Command | What it does |
+|---|---|
+| `sandbox.py sync` | push local code changes to the running sandbox and restart marimo (fast edit loop) |
+| `sandbox.py pull` | download WAVs that exist in the sandbox but not locally |
+| `sandbox.py status` | sandbox state, GPU model, marimo health, the URL, snapshot id |
+| `sandbox.py down --delete-snapshot` | teardown **and** drop the snapshot (next launch needs `seed` again) |
+| `sandbox.py down --no-pull` | teardown without downloading WAVs first |
 
 ## Using the app
 
@@ -113,45 +118,54 @@ Tick **Instrumental** for a song without vocals.
 ends the song when the lyrics resolve), seed + randomize, flow-matching steps
 (leave at 30).
 
+The execution panel shows **"✅ Running in sandbox `<id>` · GPU: `<model>`"**
+when all is well. A red **"Not running inside a GPU sandbox"** callout means the
+app was started outside the launcher (e.g. `marimo run app/app.py` on a laptop) —
+generation is disabled; launch with `sandbox.py up` instead.
+
 ## What to expect during generation
 
 Generation takes **~2 minutes per 60 s of song, plus ~1.5 minutes of model
-loading** per run. A spinner walks through the real phases — *uploading inputs →
-launched on the H100 → loading model → composing with the language model →
-decoding audio NN% → uploading to W&B* — **leave the tab open and don't
-re-click Generate**; one generation runs at a time and duplicate clicks are
-refused. When it finishes you get an audio player, a stats line (title, seed,
-duration, wall time), a **link to the W&B run**, and a download button. The WAV
-also lands in `generated_audio/MiniMax-Music3/<title>_s<seed>.wav`.
-
-## MPS mode (experimental)
-
-The device selector can target this Mac instead of the cluster (`MPS`): needs
-≥32 GB unified memory, runs 5–20× slower than the H100, downloads the ~57 GB
-model locally on first use, and the pipeline's operator coverage on Apple
-Silicon is unverified — treat failures as expected. Details:
-[`../docs/gpu_memory_tutorial.md`](../docs/gpu_memory_tutorial.md).
+loading** per run (the model loads per generation; the sandbox's GPU pool is
+heterogeneous — H100 80 GB or RTX PRO 6000 96 GB — both fit the model fully
+resident). A spinner streams the real phases. **One generation at a time**: the
+app refuses duplicate clicks, and a sandbox-wide lock also serializes against a
+concurrent `sandbox_generate.py` run targeting the same GPU. When it finishes
+you get an audio player, a stats line (title, seed, duration, wall time), a
+**link to the W&B run**, and a download button. The WAV lands in the sandbox at
+`generated_audio/MiniMax-Music3/<title>_s<seed>.wav` — run `sandbox.py pull`
+(or just `down`) to bring new WAVs to the same local path.
 
 ## Logs & troubleshooting
 
 | Where | What |
 |---|---|
-| `logs/app_ui.log` | every UI event (session id, clicks, dispatches, backend phases) — `tail -f` this while testing |
-| `logs/marimo_app.log` | the marimo server's own output (if launched via the background command) |
-| `~/music_gen_demo/logs/app_*.log` (cluster) | the raw generation logs, one per run |
+| `.launch/sandbox-state.json` (local, chmod 600) | snapshot id, sandbox id, app token |
+| `logs/app_ui.log` (inside the sandbox) | every UI event — read via `sandbox.py status` + `cwsandbox exec`, or marimo's log |
+| `/work/logs/marimo.log` (inside the sandbox) | the marimo server's own output |
+| `logs/app_<slug>_s<seed>.log` (inside the sandbox) | raw generation logs, one per run |
 
 | Symptom | Cause / fix |
 |---|---|
-| Red "allocation is NOT running" callout | Provision the cluster (step 1 above), then *↻ Re-check cluster* |
-| "Another generation is already in progress" | One song at a time — wait for the current run to finish |
-| Generation failed + log tail shown | Read the tail; cluster environment issues are catalogued in [`../docs/cluster_environment.md`](../docs/cluster_environment.md) |
-| Composer errors about `WANDB_API_KEY` | Fill in `.env` (Prerequisites §2) |
+| `probe` fails `not entitled to create GPU sandboxes` | org not allowlisted for GPU sandboxes (preview) — contact the CoreWeave account team |
+| `capacity exhausted` retries during `up` | the serverless GPU pool is momentarily full; the launcher retries 6× with backoff — or use `scripts/sandbox_generate.py` whose budget falls back to the Slurm cluster |
+| Sandbox stuck in CREATING | snapshot restore legitimately takes ~4 min; the launcher treats longer hangs as wedged, deletes and recreates automatically |
+| Browser shows 401 / login page | token mismatch — run `sandbox.py status` to print the correct URL (it recovers the token from the sandbox) |
+| Red "Not running inside a GPU sandbox" callout | app launched outside the sandbox — use `sandbox.py up` |
+| "Another generation is already in progress" | one song at a time (app lock, or `.gen.lock` held by a CLI run) — wait for the current run |
+| Generation failed + log tail shown | read the tail; sandbox environment issues are catalogued in [`../docs/sandbox_environment.md`](../docs/sandbox_environment.md) |
+| Composer errors about `WANDB_API_KEY` | fill in `.env` (Prerequisites §2) and relaunch (`down` + `up`) — the keys travel at sandbox creation |
 
 ## Files in this directory
 
 ```
 app.py           the marimo app (UI + reactive wiring)
-backend.py       execution: ssh/srun cluster runs, local MPS runs, logging, one-run-at-a-time lock
+backend.py       execution: local-subprocess generation on the sandbox GPU,
+                 sandbox detection, the one-run-at-a-time locks, and the
+                 canonical generation-log grammar + slugify
 compose.py       Kimi K2.6 composer (lyrics + captions), shared with scripts/generate_lyrics.py
 screenshots/     images used by this README
 ```
+
+The sandbox lifecycle lives in `../scripts/sandbox.py` (+ `sandbox_lib.py`);
+the headless/agent pathway with Slurm fallback is `../scripts/sandbox_generate.py`.

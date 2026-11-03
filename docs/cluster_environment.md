@@ -1,5 +1,12 @@
 # Cluster Environment Setup — MiniMax-Music3 on CoreWeave H100s
 
+> **This is now the FALLBACK path.** The primary pathway runs in serverless GPU
+> sandboxes — see [`sandbox_environment.md`](sandbox_environment.md) and
+> `scripts/sandbox.py`. This environment is what `scripts/sandbox_generate.py`
+> falls back to when a sandbox can't be acquired within its budget (and it
+> assumes the `~/music_gen_demo` mirror below is in place). Everything in this
+> doc remains valid for that path and for manual cluster runs.
+
 How to configure the environment for `minimax_music3.py` (MiniMax-Music3 text-to-music
 via diffusers Modular Pipelines) so it runs cleanly on the Slurm cluster. Most entries
 are inherited from the sibling video repo (`video_generation_model`), where each one
@@ -40,9 +47,11 @@ Hardware: one H100 80GB is plenty — the model is ~23 GB in bf16 (8B Qwen3 lang
 model + 0.6B RVQ depth decoder + 2.4B flow-matching transformer + vocoder). The first
 run downloads ~57 GB into `~/.cache/huggingface`; check the quota before launching.
 
-The marimo app (`app/app.py`) drives this same setup remotely: it writes its inputs
-to `~/music_gen_demo/tmp/` and its logs to `logs/app_*.log`, and it **assumes a
-running `musicgen` allocation — it never provisions or releases one.**
+`scripts/sandbox_generate.py`'s fallback drives this same setup remotely: it writes
+its inputs to `~/music_gen_demo/tmp/`, launches via the nohup/srun template, and
+reuses a running (or pending) `musicgen` allocation — provisioning one only when
+none exists, and releasing it afterwards only if it provisioned it. (The marimo app
+no longer touches the cluster — it runs inside a GPU sandbox.)
 
 ## The errors and their fixes
 

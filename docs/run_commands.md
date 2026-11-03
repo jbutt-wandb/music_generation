@@ -68,13 +68,15 @@ uv run scripts/generate_lyrics.py \
 # 2. Caption: write prompt.txt as a Structured Caption (crib from
 #    docs/demo_prompt_examples.md or the prompt guide's example skeleton)
 
-# 3. Sync to the cluster:
-rsync -av --exclude .git --exclude .venv --exclude generated_audio \
-  --exclude demo_audio --exclude logs ./ coreweave-login:music_gen_demo/
-
-# 4. Music (interactive compute shell, next section):
-uv run scripts/minimax_music3.py --prompt "$(cat prompt.txt)" \
-  --lyrics_file assets/<title>.txt --audio_duration 120 --seed 42
+# 3. Music — the canonical headless command: reuses or creates a GPU sandbox
+#    (10-min budget, then automatic Slurm fallback), streams phases, downloads
+#    the WAV to generated_audio/MiniMax-Music3/<slug>_s<seed>.wav:
+uv run --no-project --python 3.12 scripts/sandbox_generate.py \
+  --prompt_file prompt.txt --lyrics_file assets/<title>.txt \
+  --audio_duration 120 --seed 42
+#    (--backend sandbox|cluster forces a path; --timeout-budget 0 skips straight
+#     to the cluster; --down tears the sandbox down after; default leaves it
+#     running — release later with `scripts/sandbox.py down`)
 ```
 
 ## Route B — skills, via a coding agent (Claude Code in this repo)
@@ -88,7 +90,7 @@ uv run scripts/minimax_music3.py --prompt "$(cat prompt.txt)" \
 /music-caption-rewriter Caption: <rough style brief>. Lyrics: assets/<title>.txt
 #    → save the returned Structured Caption to prompt.txt
 
-# 3 + 4. Same sync + generate as Route A.
+# 3. Same sandbox_generate.py command as Route A.
 ```
 
 Iterate at the right layer (both routes): new take → `--seed` only; new sound →
@@ -96,21 +98,37 @@ new caption (lyrics + seed fixed); new words → new lyrics, then a new caption.
 
 # Marimo web app
 
-A local studio UI over the same script (`app/app.py`): Simple mode (Kimi K2.6
-composes lyrics + caption from a description) and Studio mode (edit lyrics,
-three caption panes, presets, tag chips).
+A studio UI over the same script (`app/app.py`), served from INSIDE a GPU
+sandbox: Simple mode (Kimi K2.6 composes lyrics + caption from a description)
+and Studio mode (edit lyrics, three caption panes, presets, tag chips).
 
 ```bash
-uv run marimo run app/app.py
+uv run --no-project --python 3.12 scripts/sandbox.py up     # prints the app URL
+# ...
+uv run --no-project --python 3.12 scripts/sandbox.py down   # pulls WAVs, stops billing
 ```
 
-**The app never starts or stops the cluster** — it requires a running
-`musicgen` allocation (sbatch command above). Full setup guide, screenshots,
-usage, and troubleshooting: **`../app/README.md`**. App runs log to W&B and
-land in `generated_audio/MiniMax-Music3/` exactly like script runs;
-cluster-side temp inputs go to `~/music_gen_demo/tmp/`, logs to `logs/app_*.log`.
+One-time first: `sandbox.py probe` (entitlement check) and `sandbox.py seed`
+(builds the venv+weights snapshot). Full setup guide, screenshots, usage, and
+troubleshooting: **`../app/README.md`**; sandbox error→fix table:
+`sandbox_environment.md`. App runs log to W&B exactly like script runs; WAVs
+land sandbox-side in `generated_audio/MiniMax-Music3/` — `sandbox.py pull`
+brings new ones local.
 
-# Manual runs (interactive compute shell)
+---
+
+# Slurm cluster — the FALLBACK path
+
+Everything below is the pre-sandbox workflow. It remains valid and is what
+`sandbox_generate.py` falls back to (it expects the `~/music_gen_demo` mirror):
+
+```bash
+# Sync the repo to the cluster mirror (re-run whenever scripts/docs change):
+rsync -av --exclude .git --exclude .venv --exclude generated_audio \
+  --exclude demo_audio --exclude logs ./ coreweave-login:music_gen_demo/
+```
+
+## Manual runs (interactive compute shell)
 
 For hands-on iteration, step into the running allocation from the login node
 (`squeue -u $USER` for the JOBID) and work interactively — `uv` is on PATH in
@@ -149,7 +167,7 @@ needed here: the script sets the JIT guard itself, and Music3 has ~55 GB of
 VRAM headroom. They remain mandatory in the non-interactive nohup/srun
 template below, which protects any entry point.)
 
-# Cluster launch template
+## Cluster launch template
 
 ```bash
 # Allocation (if none): sbatch -p h100 --gres=gpu:1 --cpus-per-task=16 --mem=100G \
@@ -160,12 +178,12 @@ nohup env TORCH_DISABLE_NATIVE_JIT=1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments
   .venv/bin/python scripts/minimax_music3.py <args> > logs/<name>.log 2>&1 &
 ```
 
-# Worked examples (cluster)
+## Worked examples (cluster)
 
 Real runs on 1× H100 (all logged to W&B `wandb-smle/jb_music_gen`; each run's
 full caption and lyrics are stored in its config).
 
-## Initial generation — indie synth-pop, 60 s (run ywz7q3x4, 2026-08-20)
+### Initial generation — indie synth-pop, 60 s (run ywz7q3x4, 2026-08-20)
 
 The "Partial" command above, launched from the login node into allocation 1150
 (`sbatch -p h100 --gres=gpu:1 --cpus-per-task=16 --mem=100G --job-name=musicgen
@@ -181,7 +199,7 @@ first attempt with `--offload none`.
 - The audio panel ("Generated Audio") uploads to the W&B run automatically;
   `wandb: Synced` + `Saved audio locally to ...wav` appeared as expected.
 
-## Three-movement ambient/psychedelic R&B suite, 180 s cap (run q1ggvxzv, 2026-10-27)
+### Three-movement ambient/psychedelic R&B suite, 180 s cap (run q1ggvxzv, 2026-10-27)
 
 One continuous piece with movement-level tempo/texture shifts described in a
 single caption (psychedelic R&B ~65–70 BPM → muffled low-passed piano ~60 BPM →
@@ -194,7 +212,7 @@ drumless free-tempo choral outro). Caption in the run's W&B config; lyrics
   duration with sparse vocals, add more `[Instrumental]`/section tags or
   repeat the outro line more times.
 
-## Memory / duration constraints (pre-run knowledge — verify against real runs)
+### Memory / duration constraints (pre-run knowledge — verify against real runs)
 
 - ~23 GB of bf16 weights: fits one H100 80GB with no offloading (`--offload none`).
   `--offload auto` ≈ 21–22 GB peak; `--offload group` ≈ 6–8 GB peak (slowest).
