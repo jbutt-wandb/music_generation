@@ -5,6 +5,8 @@ import os
 # triton-JIT kernels that fail to compile on nodes without Python dev headers
 # (see docs/cluster_environment.md).
 os.environ.setdefault("TORCH_DISABLE_NATIVE_JIT", "1")
+# Long generations fragment the CUDA allocator without expandable segments.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import torch
 import wandb
@@ -166,10 +168,12 @@ def main(config):
         # Resolved from the vocoder config (44.1 kHz for the released checkpoint)
         sampling_rate = pipe.sampling_rate
 
-        model_name = config["model_id"].split("/")[-1]
-        output_dir = os.path.join("generated_audio", model_name)
-        os.makedirs(output_dir, exist_ok=True)
-        output_filename = os.path.join(output_dir, "minimax_music3_output.wav")
+        if config.get("output"):
+            output_filename = config["output"]
+        else:
+            model_name = config["model_id"].split("/")[-1]
+            output_filename = os.path.join("generated_audio", model_name, "minimax_music3_output.wav")
+        os.makedirs(os.path.dirname(output_filename) or ".", exist_ok=True)
         # audios comes back as (batch, channels, samples) in [-1, 1];
         # soundfile wants (samples, channels)
         sf.write(output_filename, np.asarray(audios[0]).T, sampling_rate)
@@ -225,6 +229,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42, help="The random seed for reproducibility.")
     parser.add_argument("--offload", type=str, default="none", choices=["none", "auto", "group"], help="Memory strategy: none = all on GPU (~23GB, right for H100); auto = component-level CPU offload (~21-22GB peak); group = stream the 8B LLM block-by-block (~6-8GB peak, slowest). CUDA only.")
     parser.add_argument("--device", type=str, default="cuda", choices=["cuda", "mps"], help="Compute device: cuda (default, the cluster path) or mps (Apple Silicon, EXPERIMENTAL: >=32GB unified memory, much slower, only --offload none).")
+    parser.add_argument("--output", type=str, default=None, help="Output WAV path (default: generated_audio/<model>/minimax_music3_output.wav). Parent directories are created.")
 
     args = parser.parse_args()
 
@@ -242,6 +247,7 @@ if __name__ == "__main__":
         "seed": args.seed,
         "offload": args.offload,
         "device": args.device,
+        "output": args.output,
         }
 
     main(config=CONFIG)

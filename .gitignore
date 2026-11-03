@@ -12,6 +12,12 @@ wheels/
 
 # Credentials
 .env
+# Sandbox launcher state (holds the app access token + sandbox/snapshot ids)
+.launch/
+# Sandbox-side runtime artifacts — must never exist in the repo (a stray
+# .sandbox_id makes the app think it is running inside a sandbox)
+.sandbox_id
+.gen.lock
 
 # Run outputs
 /generated_audio/

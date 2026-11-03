@@ -173,6 +173,6 @@ def validate_lyrics(lyrics):
     return warnings
 
 
-def slugify(title):
-    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
-    return slug or "untitled"
+# Canonical implementation lives in app.backend (stdlib-only, importable by the
+# sandbox scripts); re-exported here to preserve this module's public surface.
+from app.backend import slugify  # noqa: E402,F401

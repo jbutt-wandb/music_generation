@@ -1,13 +1,13 @@
 """Music Generation Studio — a marimo front-end for MiniMax-Music3.
 
-A local equivalent of the official Gradio Space (Simple + Studio modes, same
-composition flow) whose generations run on the CoreWeave H100 cluster (or,
-experimentally, locally on Apple Silicon). Run with:
+An equivalent of the official Gradio Space (Simple + Studio modes, same
+composition flow) that runs INSIDE a CoreWeave serverless GPU sandbox —
+generation happens on this sandbox's own GPU. Launch it from your machine with:
 
-    uv run marimo run app/app.py
+    uv run --no-project --python 3.12 scripts/sandbox.py up
 
-REQUIREMENT: in CUDA mode the Slurm allocation must ALREADY be running — this
-app never provisions or releases GPUs. Start it yourself first (see README).
+which prints the tokenized public URL to open. This app never provisions or
+releases sandboxes — `scripts/sandbox.py` owns the lifecycle (see app/README.md).
 """
 
 import marimo
@@ -31,7 +31,7 @@ def setup():
     sys.path.insert(0, str(_root))
     os.chdir(_root)
 
-    from app.backend import SBATCH_CMD, cluster_status, get_logger, run_cluster, run_mps
+    from app.backend import get_logger, run_sandbox, sandbox_status
     from app.compose import compose_song, slugify, validate_lyrics, write_lyrics
 
     # Per-browser-session id: every UI event is logged to logs/app_ui.log with
@@ -41,8 +41,8 @@ def setup():
     applog = get_logger()
     applog.info("[%s] UI session started", session_id)
     return (
-        SBATCH_CMD, applog, cluster_status, compose_song, mo, os, random, re,
-        run_cluster, run_mps, session_id, slugify, validate_lyrics, write_lyrics,
+        applog, compose_song, mo, os, random, re, run_sandbox,
+        sandbox_status, session_id, slugify, validate_lyrics, write_lyrics,
     )
 
 
@@ -146,58 +146,46 @@ def header(mo):
         """
         # ♪ Music Generation Studio
         Full songs from a description or your own lyrics + Structured Caption —
-        **MiniMax-Music3**, generated on the CoreWeave CUDA and logged to W&B.
+        **MiniMax-Music3**, generated on this sandbox's GPU and logged to W&B.
         """
     )
     return
 
 
 @app.cell
-def device_controls(mo):
-    device = mo.ui.radio(
-        options=["CUDA (recommended)", "MPS (experimental)"],
-        value="CUDA (recommended)",
-        label="**Where should the model run?**",
-    )
-    refresh = mo.ui.run_button(label="↻ Re-check cluster")
-    return device, refresh
+def sandbox_controls(mo):
+    refresh = mo.ui.run_button(label="↻ Re-check sandbox")
+    return (refresh,)
 
 
 @app.cell
-def cluster_panel(SBATCH_CMD, applog, cluster_status, device, mo, refresh, session_id):
-    use_cluster = device.value.startswith("CUDA")
-    alloc = cluster_status() if use_cluster else None
+def sandbox_panel(applog, mo, refresh, sandbox_status, session_id):
+    sb = sandbox_status()
     applog.info(
-        "[%s] cluster_panel run: refresh_clicked=%s device=%s alloc=%s",
-        session_id, refresh.value, "cuda" if use_cluster else "mps", alloc,
+        "[%s] sandbox_panel run: refresh_clicked=%s sandbox=%s",
+        session_id, refresh.value, sb,
     )
-    if use_cluster:
-        if alloc:
-            cluster_note = mo.callout(
-                mo.md(f"✅ Cluster allocation **{alloc['jobid']}** is running — ready to generate."),
-                kind="success",
-            )
-        else:
-            cluster_note = mo.callout(
-                mo.md(
-                    "⚠️ **The cluster allocation is NOT running — and this app never starts it.**\n\n"
-                    "Provision it yourself, then click *Re-check cluster*:\n\n"
-                    f"```bash\nssh coreweave-login\n{SBATCH_CMD}\n```\n\n"
-                    "When you're done for the day, release it with `scancel <JOBID>`."
-                ),
-                kind="danger",
-            )
-    else:
-        cluster_note = mo.callout(
+    if sb:
+        sandbox_note = mo.callout(
             mo.md(
-                "🧪 **MPS mode is experimental.** Needs ≥32 GB unified memory (~23 GB of "
-                "weights), runs 5–20× slower than the H100, may hit unsupported operators, "
-                "and downloads ~57 GB on first use."
+                f"✅ Running in sandbox **{sb['sandbox_id']}** · "
+                f"GPU: **{sb['gpu_name'] or 'unknown'}** — ready to generate."
             ),
-            kind="warn",
+            kind="success",
         )
-    ready = (not use_cluster) or (alloc is not None)
-    return cluster_note, ready, use_cluster
+    else:
+        sandbox_note = mo.callout(
+            mo.md(
+                "⚠️ **Not running inside a GPU sandbox — generation is disabled.**\n\n"
+                "This app is meant to be served from a CoreWeave sandbox. Launch it "
+                "from your machine, then open the URL it prints:\n\n"
+                "```bash\nuv run --no-project --python 3.12 scripts/sandbox.py up\n```\n\n"
+                "See `app/README.md` for setup, and `scripts/sandbox.py down` to release the GPU."
+            ),
+            kind="danger",
+        )
+    ready = sb is not None
+    return ready, sandbox_note
 
 
 @app.cell
@@ -289,11 +277,11 @@ def studio_elements(PRESETS, get_fields, mo, set_fields):
 
 @app.cell
 def layout(
-    arrangement_area, assist_btn, assist_input, cluster_note, description,
-    device, global_meta_area, idea_chip_1, idea_chip_2, idea_chip_3,
-    instrumental, lyrics_area, mo, preset_buttons, refresh, settings_panel,
-    simple_generate_btn, studio_generate_btn, tag_buttons, title_input,
-    vocal_details_area, write_review_btn,
+    arrangement_area, assist_btn, assist_input, description,
+    global_meta_area, idea_chip_1, idea_chip_2, idea_chip_3,
+    instrumental, lyrics_area, mo, preset_buttons, refresh, sandbox_note,
+    settings_panel, simple_generate_btn, studio_generate_btn, tag_buttons,
+    title_input, vocal_details_area, write_review_btn,
 ):
     _simple = mo.vstack(
         [
@@ -320,7 +308,7 @@ def layout(
         ]
     )
     mode_tabs = mo.ui.tabs({"✨ Simple": _simple, "🎛 Studio": _studio})
-    _page = mo.vstack([device, refresh, cluster_note, mode_tabs, settings_panel])
+    _page = mo.vstack([refresh, sandbox_note, mode_tabs, settings_panel])
     _page
     return (mode_tabs,)
 
@@ -366,9 +354,9 @@ def compose_actions(
 def generation(
     applog, arrangement_area, compose_song, description, duration,
     get_gen_handled, global_meta_area, instrumental, lyrics_area, mo, random,
-    randomize_seed, ready, run_cluster, run_mps, seed_input, session_id,
+    randomize_seed, ready, run_sandbox, seed_input, session_id,
     set_gen_handled, set_notice, set_result, simple_generate_btn, slugify,
-    steps, studio_generate_btn, title_input, use_cluster, validate_lyrics,
+    steps, studio_generate_btn, title_input, validate_lyrics,
     vocal_details_area,
 ):
     # Dedup guard (runaway-loop fix): a click count HIGHER than the recorded
@@ -379,10 +367,9 @@ def generation(
     _new_simple = simple_generate_btn.value > _h["simple"]
     _new_studio = studio_generate_btn.value > _h["studio"]
     applog.info(
-        "[%s] generation cell run: simple=%s/%s studio=%s/%s ready=%s backend=%s",
+        "[%s] generation cell run: simple=%s/%s studio=%s/%s ready=%s backend=sandbox",
         session_id, simple_generate_btn.value, _h["simple"],
         studio_generate_btn.value, _h["studio"], ready,
-        "cuda" if use_cluster else "mps",
     )
     if (_h["simple"], _h["studio"]) != (simple_generate_btn.value, studio_generate_btn.value):
         set_gen_handled({"simple": simple_generate_btn.value, "studio": studio_generate_btn.value})
@@ -409,7 +396,6 @@ def generation(
 
     _seed = random.randint(0, 2**31 - 1) if randomize_seed.value else int(seed_input.value)
     _warnings = validate_lyrics(_lyrics)
-    _runner = run_cluster if use_cluster else run_mps
     applog.info(
         "[%s] DISPATCH title=%r slug=%s seed=%s duration=%s steps=%s mode=%s",
         session_id, _title, slugify(_title), _seed, duration.value, steps.value,
@@ -418,9 +404,9 @@ def generation(
 
     with mo.status.spinner(
         title=f"Generating “{_title}” — this takes a while, please wait…",
-        subtitle="≈2 min per 60 s of song on the cluster (much longer on MPS). Leave this tab open.",
+        subtitle="≈2 min per 60 s of song. Leave this tab open.",
     ) as _sp:
-        _res = _runner(
+        _res = run_sandbox(
             prompt=_caption, lyrics_text=_lyrics, title_slug=slugify(_title),
             duration=duration.value, seed=_seed, steps=steps.value,
             on_status=lambda s: _sp.update(subtitle=f"{s}  ·  ≈2 min per 60 s of song — leave this tab open"),
