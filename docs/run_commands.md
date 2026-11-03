@@ -117,6 +117,22 @@ brings new ones local.
 
 ---
 
+# Measured sandbox numbers (2026-11-03, first real runs)
+
+- **Seed is fast on CoreWeave's network**: the full `sandbox.py seed` — CPU
+  sandbox create, code upload, `uv sync`, the ~57 GB weights download
+  (91–136 s!), verify, snapshot READY — took ~5 minutes end to end. Reseeds
+  will be shorter still.
+- **GPU capacity exhaustion is real and sustained**: the serverless GPU pool
+  (preview) rejected creates for hours. CPU sandboxes scheduled in ~4 s
+  throughout. `sandbox_generate.py`'s 10-min budget expired and the **Slurm
+  fallback ran verified end-to-end**: provisioned allocation, 30 s song in
+  113 s wall, WAV scp'd local, allocation released (run shzx017o).
+- **W&B routing depends on `.env` completeness**: without `WANDB_ENTITY` /
+  `WANDB_PROJECT` the run lands in the API key's default entity under
+  `uncategorized`. Both must be set locally (the sandbox env inherits them)
+  and in the cluster mirror's `.env` (the fallback reads that copy).
+
 # Slurm cluster — the FALLBACK path
 
 Everything below is the pre-sandbox workflow. It remains valid and is what
